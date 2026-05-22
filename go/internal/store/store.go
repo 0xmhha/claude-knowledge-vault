@@ -368,6 +368,62 @@ func (db *DB) DeleteSession(ctx context.Context, id string) error {
 	return tx.Commit()
 }
 
+// GetTurn returns one turn row's metadata (no chunk text). Used by
+// the dashboard's /api/turn detail view to render the role / timestamp
+// header before fetching the chunks.
+func (db *DB) GetTurn(ctx context.Context, sessionID string, turnIndex int) (Turn, bool, error) {
+	const q = `SELECT session_id, turn_index, role, ts, raw_size
+		FROM turns WHERE session_id = ? AND turn_index = ?`
+	var t Turn
+	var ts int64
+	err := db.sql.QueryRowContext(ctx, q, sessionID, turnIndex).Scan(
+		&t.SessionID, &t.TurnIndex, &t.Role, &ts, &t.RawSize,
+	)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return Turn{}, false, nil
+	case err != nil:
+		return Turn{}, false, fmt.Errorf("store: get turn %s/%d: %w",
+			sessionID, turnIndex, err)
+	}
+	t.TS = time.Unix(ts, 0).UTC()
+	return t, true, nil
+}
+
+// GetChunksByTurn returns every chunk stored under one (session_id,
+// turn_index) PK, ordered by storage insertion (rowid). The turn-
+// detail dashboard pane concatenates these into the full rendered
+// text. Chunks come from the primary fts5 table only (chunks_trigram
+// is a duplicate of the content).
+func (db *DB) GetChunksByTurn(ctx context.Context, sessionID string, turnIndex int) ([]Chunk, error) {
+	const q = `SELECT title, content, role, ts
+		FROM chunks WHERE session_id = ? AND turn_index = ?
+		ORDER BY rowid`
+	rows, err := db.sql.QueryContext(ctx, q, sessionID, turnIndex)
+	if err != nil {
+		return nil, fmt.Errorf("store: get chunks %s/%d: %w",
+			sessionID, turnIndex, err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []Chunk
+	for rows.Next() {
+		var c Chunk
+		var ts int64
+		if err := rows.Scan(&c.Title, &c.Content, &c.Role, &ts); err != nil {
+			return nil, fmt.Errorf("store: scan chunk: %w", err)
+		}
+		c.SessionID = sessionID
+		c.TurnIndex = turnIndex
+		c.TS = time.Unix(ts, 0).UTC()
+		out = append(out, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: chunks rows: %w", err)
+	}
+	return out, nil
+}
+
 // ─── reads ────────────────────────────────────────────────────────────
 
 // Stats returns row counts. Cheap (each is a single index scan).

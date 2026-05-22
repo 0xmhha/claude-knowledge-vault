@@ -25,14 +25,17 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
+	"net"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
+	"syscall"
 	"time"
 
+	"github.com/wm-it/claude-knowledge-vault/internal/dashboard"
 	"github.com/wm-it/claude-knowledge-vault/internal/indexer"
 	"github.com/wm-it/claude-knowledge-vault/internal/mcp"
 	"github.com/wm-it/claude-knowledge-vault/internal/search"
@@ -79,8 +82,6 @@ func run(args []string, stdin, stdout, stderr *os.File) int {
 		port         = fs.Int("port", 0, "dashboard port (0 = pick free; env: KVAULT_PORT)")
 		printVersion = fs.Bool("version", false, "print version and exit")
 	)
-	_ = port // dashboard mode wires this in T-D.3
-
 	fs.Usage = func() {
 		fmt.Fprintf(stderr, "kvault %s — local search over your Claude Code conversations\n\n", Version)
 		fmt.Fprintln(stderr, "Usage:")
@@ -144,9 +145,7 @@ func run(args []string, stdin, stdout, stderr *os.File) int {
 		return runOnce(ctx, db, resolvedRoot, resolvedData, *onceOp,
 			*query, *limit, *source, *role, since, *force, *yes, stdout, stderr)
 	default:
-		fmt.Fprintf(stderr, "kvault %s — dashboard mode not yet implemented (see T-D.3).\n", Version)
-		fmt.Fprintln(stderr, "For now: kvault --mcp (stdio server) or --once <op>")
-		return exitUser
+		return runDashboard(ctx, db, resolvedRoot, resolvedData, *port, stdout, stderr)
 	}
 }
 
@@ -197,6 +196,34 @@ func parseSince(s string) (time.Time, error) {
 		return time.Time{}, fmt.Errorf("expected RFC3339 (e.g. 2026-05-01T00:00:00Z): %w", err)
 	}
 	return t, nil
+}
+
+// ─── Dashboard mode ──────────────────────────────────────────────────
+
+// runDashboard binds the dashboard to 127.0.0.1:<port> (0 = pick free)
+// and blocks until SIGINT/SIGTERM. Localhost-only by design: kvault
+// is a single-user tool and the DB may quote pasted credentials.
+func runDashboard(ctx context.Context, db *store.DB, root, data string,
+	port int, stdout, stderr *os.File,
+) int {
+	if port == 0 {
+		port = envInt("KVAULT_PORT", 0)
+	}
+	addr := "127.0.0.1:" + strconv.Itoa(port)
+	srv := dashboard.New(db, root, data)
+
+	sigCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	onListen := func(a net.Addr) {
+		fmt.Fprintf(stdout, "kvault dashboard listening on http://%s\n", a.String())
+		fmt.Fprintln(stdout, "  Ctrl-C to stop. API at /api/*, UI at /.")
+	}
+	if err := srv.Run(sigCtx, addr, onListen); err != nil {
+		fmt.Fprintf(stderr, "dashboard: %v\n", err)
+		return exitRuntime
+	}
+	return exitOK
 }
 
 // ─── MCP mode ────────────────────────────────────────────────────────
@@ -412,9 +439,8 @@ func runOnce(ctx context.Context, db *store.DB, root, data, op string,
 // ─── env knobs that aren't flag-bound ────────────────────────────────
 
 // envInt reads an int env var with a fallback. Used by the dashboard
-// mode wire-up in T-D.3 (KVAULT_PORT), kept here so the flag plumbing
-// stays in one place.
-func envInt(key string, fallback int) int { //nolint:unused // wired in T-D.3
+// mode wire-up for KVAULT_PORT.
+func envInt(key string, fallback int) int {
 	v := os.Getenv(key)
 	if v == "" {
 		return fallback
@@ -425,7 +451,3 @@ func envInt(key string, fallback int) int { //nolint:unused // wired in T-D.3
 	}
 	return n
 }
-
-// silence "imported and not used" warnings for transition deps that
-// T-D.3 will pick up.
-var _ = errors.New

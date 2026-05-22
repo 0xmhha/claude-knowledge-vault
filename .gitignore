@@ -1,6 +1,10 @@
 # Go build artifacts
 /env-sync
 /env-sync.exe
+/kvault
+/kvault.exe
+go/kvault
+go/kvault.exe
 *.test
 *.out
 coverage.out
