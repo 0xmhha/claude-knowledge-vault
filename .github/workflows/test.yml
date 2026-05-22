@@ -1,0 +1,102 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    name: Go test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.2'
+          cache: true
+          cache-dependency-path: go/go.sum
+
+      - name: go vet
+        working-directory: go
+        run: go vet ./...
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          working-directory: go
+          args: --timeout=3m
+
+      - name: go test -race -cover
+        working-directory: go
+        run: go test -race -cover -timeout=5m ./...
+
+      - name: go build (smoke)
+        working-directory: go
+        run: go build ./...
+
+  bash-regression:
+    name: Bash regression
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.2'
+          cache: true
+          cache-dependency-path: go/go.sum
+
+      - name: Build env-sync
+        working-directory: go
+        run: go build -o ../bin/env-sync ./cmd/env-sync
+
+      - name: Run regression scripts (if any)
+        run: |
+          if ls tests/regression-*.sh >/dev/null 2>&1; then
+            for s in tests/regression-*.sh; do
+              echo "::group::$s"
+              bash "$s"
+              echo "::endgroup::"
+            done
+          else
+            echo "No regression scripts yet."
+          fi
+
+  secret-scan:
+    name: Gitleaks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  shellcheck:
+    name: Shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run shellcheck on bin/ and .githooks/
+        run: |
+          shopt -s nullglob
+          files=( .githooks/* bin/*.sh tests/regression-*.sh )
+          if [ "${#files[@]}" -gt 0 ]; then
+            shellcheck "${files[@]}"
+          else
+            echo "No shell files to check yet."
+          fi
