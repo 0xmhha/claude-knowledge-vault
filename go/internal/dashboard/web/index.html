@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>kvault</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <h1>kvault</h1>
+    <span id="stats-pill" class="pill pill-unknown" title="Vault size">…</span>
+    <span id="stats-summary" class="muted">connecting…</span>
+  </header>
+
+  <main>
+    <section id="search" aria-labelledby="search-heading">
+      <h2 id="search-heading" class="visually-hidden">Search</h2>
+      <form id="search-form" class="search-row" autocomplete="off">
+        <input id="search-input" name="query" type="search"
+               placeholder="search past conversations…"
+               spellcheck="false" autofocus required>
+        <button type="submit">Search</button>
+      </form>
+      <div class="filter-row">
+        <label>source
+          <select id="filter-source" name="source">
+            <option value="">all</option>
+            <option value="bm25">bm25</option>
+            <option value="trigram">trigram</option>
+          </select>
+        </label>
+        <label>since
+          <input id="filter-since" name="since" type="text"
+                 placeholder="2026-01-01T00:00:00Z" spellcheck="false">
+        </label>
+        <label>role
+          <select id="filter-role" name="role">
+            <option value="">any</option>
+            <option value="user">user</option>
+            <option value="assistant">assistant</option>
+          </select>
+        </label>
+        <label>limit
+          <input id="filter-limit" name="limit" type="number"
+                 min="1" max="200" value="20">
+        </label>
+      </div>
+    </section>
+
+    <section id="results" aria-labelledby="results-heading">
+      <h2 id="results-heading">Results <span id="results-count" class="muted"></span></h2>
+      <ul id="results-list" class="results" aria-live="polite">
+        <li class="muted">(type a query and hit ⏎)</li>
+      </ul>
+      <p id="results-fallback" class="muted" hidden>
+        No BM25 hits. Showing trigram fallback.
+      </p>
+    </section>
+
+    <section id="actions" aria-labelledby="actions-heading">
+      <h2 id="actions-heading">Maintenance</h2>
+      <form id="index-form" class="row">
+        <label class="row-inline">
+          <input id="index-force" name="force" type="checkbox">
+          force (ignore content-hash gate)
+        </label>
+        <button type="submit">Re-index now</button>
+      </form>
+      <form id="purge-form" class="row">
+        <label class="row-inline">
+          <input id="purge-confirm" name="confirm" type="checkbox">
+          confirm: drop every row (schema kept)
+        </label>
+        <button type="submit" class="danger">Purge</button>
+      </form>
+    </section>
+
+    <section id="activity" aria-labelledby="activity-heading">
+      <h2 id="activity-heading">Activity</h2>
+      <ol id="activity-log" class="events" aria-live="polite">
+        <li class="muted">(SSE feed — joins on load)</li>
+      </ol>
+    </section>
+  </main>
+
+  <!-- Turn detail drawer — populated by T-D.5 -->
+  <aside id="turn-drawer" class="drawer" hidden aria-hidden="true"
+         aria-labelledby="drawer-heading">
+    <header class="drawer-head">
+      <h2 id="drawer-heading">Turn detail</h2>
+      <button id="turn-close-btn" type="button" title="Close (Esc)">×</button>
+    </header>
+    <dl class="kv" id="turn-meta">
+      <dt>Session</dt> <dd data-field="session_id">—</dd>
+      <dt>Turn</dt>    <dd data-field="turn_index">—</dd>
+      <dt>Role</dt>    <dd data-field="role">—</dd>
+      <dt>When</dt>    <dd data-field="ts">—</dd>
+      <dt>Heading</dt> <dd data-field="title">—</dd>
+    </dl>
+    <pre id="turn-content" class="turn-content"></pre>
+    <footer class="drawer-foot muted">
+      Secrets are masked before render — toggle in <code>--no-mask</code> mode.
+    </footer>
+  </aside>
+
+  <footer>
+    <span class="muted">
+      kvault · localhost only · API at <code>/api/*</code>
+    </span>
+  </footer>
+
+  <script src="/app.js" defer></script>
+</body>
+</html>
