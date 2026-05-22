@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# Pre-push gate. Heavier than pre-commit (<60s target).
+# Runs: go vet + go test (short) + bash regression
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+if [ -t 1 ]; then
+  RED=$'\033[0;31m'
+  GRN=$'\033[0;32m'
+  NC=$'\033[0m'
+else
+  RED='' GRN='' NC=''
+fi
+
+fail=0
+
+# Only run if go/ exists and has any .go files (skip for docs-only pushes)
+if [ -d go ] && find go -name '*.go' -print -quit | grep -q .; then
+  echo "→ go vet…"
+  if ! (cd go && go vet ./...); then
+    echo "${RED}✗ go vet failed${NC}"
+    fail=1
+  fi
+
+  echo "→ go test (short)…"
+  if ! (cd go && go test ./... -short -timeout=60s); then
+    echo "${RED}✗ go test failed${NC}"
+    fail=1
+  fi
+fi
+
+# Regression scripts (if any exist)
+if [ -d tests ] && find tests -name 'regression-*.sh' -print -quit | grep -q .; then
+  echo "→ bash regression scripts…"
+  for s in tests/regression-*.sh; do
+    echo "  $s"
+    if ! bash "$s"; then
+      echo "${RED}✗ regression $s failed${NC}"
+      fail=1
+    fi
+  done
+fi
+
+if [ "$fail" -ne 0 ]; then
+  echo ""
+  echo "${RED}Pre-push checks FAILED.${NC}"
+  echo "Fix issues above. Use --no-verify only in emergencies (audit-logged)."
+  exit 1
+fi
+
+echo "${GRN}✓ pre-push OK${NC}"

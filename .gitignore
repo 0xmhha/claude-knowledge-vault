@@ -1,0 +1,43 @@
+# Go build artifacts
+/env-sync
+/env-sync.exe
+*.test
+*.out
+coverage.out
+coverage.html
+
+# Pre-built binaries for distribution (built by CI, not committed)
+/dist/
+/bin/darwin-*/
+/bin/linux-*/
+/bin/windows-*/
+
+# Local plugin data (testing)
+/.test-data/
+/.claude-plugin-data/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*~
+
+# Secrets — defense in depth (should never appear, but block at gitignore level too)
+*.env
+*.env.local
+.credentials.json
+*-secret.*
+*-key.pem
+*.pem
+*.p12
+
+# Logs
+*.log
+
+# Temporary
+*.tmp
+*.bak

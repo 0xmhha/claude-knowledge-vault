@@ -1,0 +1,37 @@
+# gitleaks config — extends default with project-specific allowlist + custom rules.
+# Reference: https://github.com/gitleaks/gitleaks#configuration
+
+[extend]
+useDefault = true
+
+# Project allowlist: fixtures, examples, planning docs.
+[allowlist]
+description = "PoC fixtures and planning docs"
+paths = [
+  # PLAN/IMPL_PLAN examples may contain pattern-shaped strings as documentation
+  '''^PLAN\.md$''',
+  '''^IMPL_PLAN\.md$''',
+  # Tests intentionally use fake secrets to verify detection
+  '''^tests/regression-secrets-leak\.sh$''',
+  '''_test\.go$''',
+  '''testdata/''',
+]
+# Known-safe placeholder strings used in docs/tests
+regexes = [
+  '''sk-test-[A-Za-z0-9]+''',                 # fake OpenAI key marker
+  '''AKIA[A-Z]{4}EXAMPLE[A-Z]{4}''',          # fake AWS key marker
+  '''ghp_FAKE[A-Za-z0-9]{32}''',              # fake GitHub token marker
+]
+
+# Project-specific custom rules (in addition to default ruleset).
+[[rules]]
+id = "claude-api-key"
+description = "Anthropic Claude API key"
+regex = '''sk-ant-[a-zA-Z0-9_-]{32,}'''
+keywords = ["sk-ant-"]
+
+[[rules]]
+id = "github-fine-grained-pat"
+description = "GitHub fine-grained personal access token"
+regex = '''github_pat_[A-Za-z0-9_]{20,}'''
+keywords = ["github_pat_"]

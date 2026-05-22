@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+# Pre-commit gate. Fast (<10s target). Lints + secret scan on staged files only.
+#
+# Enable: git config core.hooksPath .githooks
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+# Color helpers (only if stdout is a TTY)
+if [ -t 1 ]; then
+  RED=$'\033[0;31m'
+  YEL=$'\033[0;33m'
+  GRN=$'\033[0;32m'
+  NC=$'\033[0m'
+else
+  RED='' YEL='' GRN='' NC=''
+fi
+
+fail=0
+
+# ── 1. Secret scan ──
+# gitleaks is preferred. Falls back to grep for common patterns if absent.
+staged_files=$(git diff --cached --name-only --diff-filter=ACMR)
+if [ -z "$staged_files" ]; then
+  echo "${YEL}pre-commit: no staged files, skipping.${NC}"
+  exit 0
+fi
+
+if command -v gitleaks >/dev/null 2>&1; then
+  echo "→ secret scan (gitleaks)…"
+  if ! gitleaks protect --staged --verbose --no-banner; then
+    echo "${RED}✗ gitleaks detected potential secrets in staged changes.${NC}"
+    fail=1
+  fi
+else
+  echo "→ secret scan (fallback grep)…"
+  # Common secret patterns. Tuned for low false-positive on this repo.
+  patterns=(
+    'AKIA[0-9A-Z]{16}'                              # AWS access key
+    'sk-[a-zA-Z0-9_-]{20,}'                         # OpenAI / similar
+    'sk-ant-[a-zA-Z0-9_-]{20,}'                     # Anthropic
+    'ghp_[A-Za-z0-9]{36}'                           # GitHub personal token
+    'ghs_[A-Za-z0-9]{36}'                           # GitHub server token
+    'eyJ[A-Za-z0-9_-]{20,}\.eyJ[A-Za-z0-9_-]{20,}'  # JWT (header.payload)
+    '-----BEGIN (RSA|EC|OPENSSH|DSA) PRIVATE KEY-----'
+  )
+  for f in $staged_files; do
+    [ -f "$f" ] || continue
+    # Allowlist mirrors .gitleaks.toml: test fixtures and planning docs may
+    # contain pattern-shaped strings intentionally (regression / detection
+    # tests, doc examples). Skip them in the fallback grep too.
+    case "$f" in
+      *_test.go|*/testdata/*|testdata/*|tests/regression-*.sh|PLAN.md|IMPL_PLAN.md)
+        continue
+        ;;
+    esac
+    for pat in "${patterns[@]}"; do
+      if git show ":$f" 2>/dev/null | grep -E "$pat" >/dev/null 2>&1; then
+        echo "${RED}✗ Possible secret matching /$pat/ in $f${NC}"
+        fail=1
+      fi
+    done
+  done
+fi
+
+# ── 2. Go formatting + vet on staged .go files ──
+go_files=$(echo "$staged_files" | grep '\.go$' || true)
+if [ -n "$go_files" ]; then
+  echo "→ go fmt check…"
+  unformatted=$(gofmt -l $go_files || true)
+  if [ -n "$unformatted" ]; then
+    echo "${RED}✗ Unformatted Go files:${NC}"
+    echo "$unformatted"
+    echo "  Run: gofmt -w $go_files"
+    fail=1
+  fi
+
+  if command -v golangci-lint >/dev/null 2>&1; then
+    echo "→ golangci-lint (staged)…"
+    # --new-from-rev=HEAD で staged changes 만. 빠름.
+    if ! (cd go && golangci-lint run --new-from-rev=HEAD --timeout=90s 2>&1); then
+      echo "${RED}✗ golangci-lint found issues.${NC}"
+      fail=1
+    fi
+  fi
+fi
+
+# ── 3. Bash shellcheck on staged .sh files (best-effort) ──
+sh_files=$(echo "$staged_files" | grep -E '\.(sh|bash)$' || true)
+if [ -n "$sh_files" ] && command -v shellcheck >/dev/null 2>&1; then
+  echo "→ shellcheck…"
+  if ! shellcheck $sh_files; then
+    echo "${RED}✗ shellcheck found issues.${NC}"
+    fail=1
+  fi
+fi
+
+if [ "$fail" -ne 0 ]; then
+  echo ""
+  echo "${RED}Pre-commit checks FAILED.${NC}"
+  echo "Fix issues above and re-stage. Use --no-verify only in emergencies."
+  exit 1
+fi
+
+echo "${GRN}✓ pre-commit OK${NC}"

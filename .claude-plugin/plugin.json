@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin.json",
+  "name": "claude-knowledge-vault",
+  "version": "0.1.0",
+  "description": "Local-first semantic + keyword search over your own Claude Code conversation history. Reads ~/.claude/projects/*.jsonl, indexes into SQLite FTS5, exposes MCP + dashboard + slash. 100% offline, no external embeddings.",
+  "author": {
+    "name": "wm-it",
+    "url": "https://github.com/wm-it/claude-knowledge-vault"
+  },
+  "homepage": "https://github.com/wm-it/claude-knowledge-vault",
+  "repository": "https://github.com/wm-it/claude-knowledge-vault",
+  "license": "MIT",
+  "keywords": [
+    "claude-code",
+    "search",
+    "memory",
+    "knowledge-base",
+    "sqlite",
+    "fts5",
+    "bm25",
+    "mcp",
+    "local-first",
+    "offline",
+    "privacy",
+    "cosign"
+  ],
+  "mcpServers": {
+    "knowledge-vault": {
+      "command": "bash",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/bin/run.sh", "--mcp"]
+    }
+  }
+}

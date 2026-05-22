@@ -1,0 +1,88 @@
+# golangci-lint config. Conservative set — extend after PoC.
+# https://golangci-lint.run/usage/configuration/
+version: "2"
+
+run:
+  timeout: 3m
+  modules-download-mode: readonly
+
+linters:
+  default: none
+  enable:
+    # Core correctness
+    - errcheck       # unchecked errors
+    - govet          # go vet
+    - ineffassign    # ineffective assignments
+    - staticcheck    # mega-linter (replaces many)
+    - unused         # unused vars/funcs/imports
+
+    # Style + minor pitfalls
+    - gocritic       # opinionated checks
+    - misspell       # spelling
+    - revive         # configurable golint replacement
+
+    # Security
+    - gosec          # security issues
+
+    # Concurrency
+    - bidichk        # bidi unicode (CVE-2021-42574)
+
+  settings:
+    errcheck:
+      # fmt.Fprint*/Println/Printf rarely fail in real usage (stdout/stderr
+      # is closed → process is exiting anyway). Wrapping every call in
+      # explicit _, _ = ... blurs intent without catching real issues.
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintln
+        - fmt.Fprintf
+        - fmt.Print
+        - fmt.Println
+        - fmt.Printf
+        - (*os.File).Close
+        - (io.Closer).Close
+
+    revive:
+      severity: warning
+      rules:
+        - name: var-naming
+        - name: package-comments
+        - name: exported
+        - name: error-return
+        - name: error-naming
+        - name: if-return
+        - name: increment-decrement
+        - name: range
+        - name: receiver-naming
+        - name: time-naming
+        - name: unexported-return
+        - name: errorf
+        - name: empty-block
+
+    gosec:
+      # G204 (subprocess with variable) is fired by our git argv-array calls.
+      # We avoid shell injection by passing []string{} to exec.Command, not a
+      # shell string. Exclude G204 globally, but lint other gosec rules.
+      excludes:
+        - G204
+
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - performance
+        - style
+      disabled-checks:
+        - ifElseChain   # personal taste
+        - whyNoLint     # noisy
+
+  exclusions:
+    rules:
+      # Tests can use t.Fatal, t.Errorf — relax some rules
+      - path: _test\.go
+        linters:
+          - gosec
+          - revive
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

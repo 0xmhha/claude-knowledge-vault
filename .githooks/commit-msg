@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Conventional Commits enforcement.
+# Format: type(scope): subject  [body]
+# Allowed types: feat, fix, refactor, docs, test, chore, perf, ci, build
+set -euo pipefail
+
+msg_file="$1"
+first_line=$(head -n1 "$msg_file")
+
+# Allow merge commits, revert commits, and fixup/squash WIP from rebase
+if echo "$first_line" | grep -qE '^(Merge |Revert |fixup!|squash!)'; then
+  exit 0
+fi
+
+pattern='^(feat|fix|refactor|docs|test|chore|perf|ci|build)(\([a-z0-9-]+\))?!?: .{3,}'
+if ! echo "$first_line" | grep -qE "$pattern"; then
+  echo "✗ Commit message does not follow Conventional Commits format."
+  echo ""
+  echo "  Got:      $first_line"
+  echo "  Expected: <type>(<scope>): <subject>"
+  echo "  Types:    feat, fix, refactor, docs, test, chore, perf, ci, build"
+  echo ""
+  echo "  Examples:"
+  echo "    feat(syncengine): add Init entry with backupgit wiring"
+  echo "    fix(exclude): handle round-trip on multi-line strings"
+  echo "    chore: bootstrap Go module"
+  exit 1
+fi
