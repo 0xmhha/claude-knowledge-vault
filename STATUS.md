@@ -20,9 +20,23 @@ workflow)** 과 **테스트/문서 확장** 두 덩어리 — 모두 critical pa
 origin   https://github.com/0xmhha/claude-knowledge-vault.git
 ```
 
-로컬 17 commit 이 origin/main 으로 push 되어야 한다. 다음 세션
-첫 작업이 push 라면 [§9 진입 방법](#9-다음-세션-진입-방법) 의
-"remote push" 참조.
+로컬 commit 들이 origin/main 으로 push 되어야 한다. 다음 세션 첫
+작업이 push 라면 [§9 진입 방법](#9-다음-세션-진입-방법) 의 "remote
+push" 참조.
+
+### 1.1. 자매 plugin (fork base)
+
+남은 task 중 일부는 `claude-env-sync` 의 동일 task 산출물을
+직접 fork 한다 (PLAN §3 "Already exists" map). 새 머신에서는
+sibling 으로 clone 해 두면 같은 fork-then-port 흐름을 그대로
+재현할 수 있다.
+
+```
+git clone https://github.com/0xmhha/claude-env-sync.git ../claude-env-sync
+```
+
+각 task 의 spec 본문 (§5) 에 어떤 env-sync 파일을 fork 하는지 commit
+SHA 와 함께 명시했으니, 위 디렉토리만 있으면 `cp` 한 차례로 끝난다.
 
 ## 2. 무엇을 만드는 중인가
 
@@ -360,46 +374,105 @@ end-to-end assertion 패턴 그대로 (build → seed → run → grep).
 
 ## 9. 다음 세션 진입 방법
 
+### 9.0. Toolchain (cold install on a new machine)
+
+| 도구 | 버전 | 비고 |
+| --- | --- | --- |
+| Go | **1.25.2** 이상 | go.mod 에 pin. 더 낮으면 build 실패 |
+| modernc.org/sqlite | v1.50.1 | go.sum pin, 첫 `go build` 시 10–30 초 download |
+| golangci-lint | latest (≥ 1.61) | CI 동일. `brew install golangci-lint` 또는 [공식 install script](https://golangci-lint.run/welcome/install/) |
+| gitleaks | optional | 없으면 pre-commit 의 fallback grep 사용 |
+| shellcheck | CI 필수 | T-P.2 / regression 스크립트 lint |
+| node | optional | T-D.2 / T-D.5 의 `node --check app.js` |
+| sqlite3 CLI | optional | DB 직접 디버그 |
+
+### 9.1. Setup (clone 후 한 번만)
+
 ```bash
-# Clone
 git clone https://github.com/0xmhha/claude-knowledge-vault.git
 cd claude-knowledge-vault
 
-# Verify everything still green
+# Sibling fork base — §5 의 fork-then-port task 들이 이걸 참조
+git clone https://github.com/0xmhha/claude-env-sync.git ../claude-env-sync
+
+# pre-commit / commit-msg / pre-push hook 활성화 (필수)
+git config core.hooksPath .githooks
+
+# Commit 시 사용할 user identity (env-sync 와 동일)
+git config user.name  'wm-it'
+git config user.email 'wm-it@local'   # 또는 본인 이메일
+
+# Commit message 규칙: Conventional Commits 강제
+#   <type>(<scope>): <subject>
+#   type:  feat | fix | refactor | docs | test | chore | perf | ci | build
+#   scope: snake-case 또는 한 단어, '/' 사용 금지
+# 예: feat(store): add GetTurn helper
+#     ✗ feat(dashboard/web): ...    (commit-msg hook 가 reject)
+```
+
+### 9.2. Verify (clone 후 매번 — "everything still green?")
+
+```bash
 cd go && go test -race -cover ./... && go vet ./... && cd ..
 golangci-lint run go/... --timeout=2m
+```
 
-# Build + binary smoke
+기대값: 9 package 전부 green, lint 0 issues, 평균 cov 80%+
+(단 store 만 회귀 68.3% — §6 참조, 다음 세션 첫 작업 후보).
+
+### 9.3. Binary smoke (build + 4 endpoint 확인)
+
+```bash
 ( cd go && go build -o ../kvault ./cmd/kvault )
 mkdir -p /tmp/kv-demo
-./kvault --version                                          # → 0.1.0-dev
-./kvault --once stats --plugin-data /tmp/kv-demo            # → {Sessions:0, Turns:0, Chunks:0}
-./kvault --once search --plugin-data /tmp/kv-demo --query x # → []
+./kvault --version                                            # → 0.1.0-dev
+./kvault --once stats --plugin-data /tmp/kv-demo              # → {Sessions:0, Turns:0, Chunks:0}
+./kvault --once search --plugin-data /tmp/kv-demo --query x   # → []
 
-# Dashboard smoke (open browser to printed URL)
+# Dashboard (printed URL 을 브라우저로)
 ./kvault --port 0 --plugin-data /tmp/kv-demo
 # Ctrl-C to stop
+```
 
-# Real dogfood (if you have ~/.claude/projects with jsonl files)
+### 9.4. Dogfood (실제 `~/.claude/projects` 인덱싱 — 선택)
+
+```bash
 ./kvault --once index --plugin-data /tmp/kv-demo
 ./kvault --once search --plugin-data /tmp/kv-demo --query "hook decision"
 ```
 
-### Remote push (1차 마무리 직후)
+### Remote push (필요 시)
 
 ```bash
 cd claude-knowledge-vault
-git remote add origin https://github.com/0xmhha/claude-knowledge-vault.git  # 이미 추가됐다면 skip
+git remote add origin https://github.com/0xmhha/claude-knowledge-vault.git  # 이미 있다면 skip
 git push -u origin main
 ```
 
 푸시 인증 실패 시: `gh auth login` 또는 GitHub PAT credential helper.
 
-### 다음 task 선택 (권장 순서)
+### 9.5. 환경 변수 reference
+
+CLI flag 가 모든 옵션의 1차 source. 환경 변수는 fallback:
+
+| Variable | 적용 | 우선순위 |
+| --- | --- | --- |
+| `KVAULT_DATA` | `--plugin-data` 대체 | 2 |
+| `CLAUDE_PLUGIN_DATA` | `--plugin-data` 2차 fallback | 3 |
+| `CLAUDE_HOME` | `--root` (자동 `/projects` 추가) | 2 |
+| `KVAULT_PORT` | `--port` 대체 (dashboard 모드) | 2 |
+| `CLAUDE_PLUGIN_ROOT` | plugin install 위치 (run.sh 가 사용) | n/a |
+| `ENV_SYNC_RELEASE` | T-P.2 run.sh 의 release-fetch 모드 트리거 | n/a |
+| `ENV_SYNC_PLATFORM` | T-P.2 run.sh 의 cross-compile 강제 | n/a |
+| `ENV_SYNC_SKIP_VERIFY` | T-P.2 run.sh 의 cosign verify 우회 (NOT recommended) | n/a |
+
+(우선순위: flag > KVAULT_* > CLAUDE_* > built-in default)
+
+### 9.6. 다음 task 선택 (권장 순서)
 
 1. **store cov 회복** (10 분) — `GetTurn` + `GetChunksByTurn` unit test 2개
 2. **T-T.5 README + screenshot** (1 hr) — 다음 모든 docs 의 anchor
-3. **T-P.2 bin/run.sh** (30 분) — env-sync verbatim fork
+3. **T-P.2 bin/run.sh** (30 분) — env-sync verbatim fork (sibling clone 필요)
 4. **T-P.3 slash/kv.md** (15 분) — `/kv <query>` 작동
 5. **T-T.3 + T-T.4 regression** (2 hr) — security/privacy mechanical proof
 6. **T-P.4 release workflow** (half-day) — cosign keyless OIDC
