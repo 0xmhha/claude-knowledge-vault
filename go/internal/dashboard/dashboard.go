@@ -203,6 +203,10 @@ type turnResponse struct {
 	Title     string    `json:"title,omitempty"`
 	Content   string    `json:"content"`
 	RawSize   int       `json:"raw_size"`
+	// FilePath is the absolute jsonl path the turn came from — the
+	// drawer surfaces this so a curious user can "Open in editor"
+	// (we just show the path; we don't shell out to an editor).
+	FilePath string `json:"file_path,omitempty"`
 }
 
 func (s *Server) handleTurn(w http.ResponseWriter, r *http.Request) {
@@ -244,6 +248,12 @@ func (s *Server) handleTurn(w http.ResponseWriter, r *http.Request) {
 	if s.MaskSecrets {
 		content = secrets.Mask(content)
 	}
+	// Look up the session row for the file_path (best-effort — a
+	// missing row just leaves file_path empty).
+	var filePath string
+	if sess, found, _ := s.db.GetSession(r.Context(), sessionID); found {
+		filePath = sess.FilePath
+	}
 	respondJSON(w, http.StatusOK, turnResponse{
 		SessionID: turn.SessionID,
 		TurnIndex: turn.TurnIndex,
@@ -252,6 +262,7 @@ func (s *Server) handleTurn(w http.ResponseWriter, r *http.Request) {
 		Title:     title,
 		Content:   content,
 		RawSize:   turn.RawSize,
+		FilePath:  filePath,
 	})
 }
 

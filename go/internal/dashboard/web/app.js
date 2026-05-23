@@ -6,9 +6,13 @@
 
 const PILL_LABELS = { ok: 'ok', warn: 'warn', error: 'err', unknown: '…' };
 
+// T-D.5 surrounding-turns window. ±N around the focused turn.
+const SURROUNDING_RADIUS = 3;
+
 window.addEventListener('DOMContentLoaded', () => {
   bindForms();
   bindResultsClick();
+  bindResultsKeyboard();
   bindDrawer();
   loadInitialStats();
   connectEvents();
@@ -179,6 +183,7 @@ function setResultsCount(n) {
 function buildResultItem(r) {
   const li = document.createElement('li');
   li.className = 'result' + (r.source === 'trigram' ? ' source-trigram' : '');
+  li.tabIndex = 0; // focusable for keyboard nav
   li.dataset.sessionId = r.session_id;
   li.dataset.turnIndex = String(r.turn_index);
 
@@ -226,12 +231,60 @@ function bindResultsClick() {
   });
 }
 
+// Keyboard navigation on the result list: ↑ / ↓ move focus between
+// results, ⏎ opens the drawer for the focused row. We intentionally
+// only fire when focus is already on a .result (or on body), so the
+// search box still takes ⏎ for submit.
+function bindResultsKeyboard() {
+  const ul = document.getElementById('results-list');
+  document.addEventListener('keydown', (ev) => {
+    const focused = document.activeElement;
+    const onResult = focused && focused.classList && focused.classList.contains('result');
+    const items = Array.from(ul.querySelectorAll('li.result'));
+    if (items.length === 0) return;
+
+    if (ev.key === 'ArrowDown') {
+      if (!onResult) { items[0].focus(); ev.preventDefault(); return; }
+      const i = items.indexOf(focused);
+      if (i < items.length - 1) {
+        items[i + 1].focus();
+        ev.preventDefault();
+      }
+    } else if (ev.key === 'ArrowUp') {
+      if (!onResult) return;
+      const i = items.indexOf(focused);
+      if (i > 0) {
+        items[i - 1].focus();
+        ev.preventDefault();
+      }
+    } else if (ev.key === 'Enter' && onResult) {
+      const sid = focused.dataset.sessionId;
+      const idx = focused.dataset.turnIndex;
+      if (sid && idx != null) {
+        openDrawer(sid, parseInt(idx, 10));
+        ev.preventDefault();
+      }
+    }
+  });
+}
+
 function bindDrawer() {
   const drawer = document.getElementById('turn-drawer');
   document.getElementById('turn-close-btn').addEventListener('click', () => closeDrawer());
   document.addEventListener('keydown', (ev) => {
     if (ev.key === 'Escape' && !drawer.hidden) closeDrawer();
   });
+  // Backdrop click — anything outside the drawer (when open) closes
+  // it. Listen on document at capture so a single click reliably
+  // hits before any other listener.
+  document.addEventListener('mousedown', (ev) => {
+    if (drawer.hidden) return;
+    if (drawer.contains(ev.target)) return;
+    // Result clicks reopen the drawer immediately after closing, so
+    // ignore those — closeDrawer + openDrawer fires the same frame.
+    if (ev.target.closest && ev.target.closest('li.result')) return;
+    closeDrawer();
+  }, true);
 }
 
 async function openDrawer(sessionID, turnIdx) {
@@ -245,8 +298,11 @@ async function openDrawer(sessionID, turnIdx) {
     setField('ts', t.ts ? new Date(t.ts).toISOString() : '—');
     setField('title', t.title || '—');
     document.getElementById('turn-content').textContent = t.content || '';
+    renderDrawerToolbar(t);
     drawer.hidden = false;
     drawer.setAttribute('aria-hidden', 'false');
+    // Move focus into the drawer so Esc / Tab behave sensibly.
+    document.getElementById('turn-close-btn').focus();
   } catch (err) {
     appendActivity('error', `open turn ${sessionID}/${turnIdx}: ${err.message}`);
   }
@@ -256,6 +312,127 @@ function closeDrawer() {
   const drawer = document.getElementById('turn-drawer');
   drawer.hidden = true;
   drawer.setAttribute('aria-hidden', 'true');
+  // Drop any surrounding-turns expansion so the next open starts clean.
+  const surr = document.getElementById('turn-surrounding');
+  if (surr) surr.remove();
+}
+
+// renderDrawerToolbar injects a small action bar above the content
+// area: Copy (clipboard), Show ±N (load surrounding turns), and a
+// file-path display. The bar is created fresh each open so it
+// captures the current turn's identifiers via closure.
+function renderDrawerToolbar(t) {
+  const meta = document.getElementById('turn-meta');
+  // Drop any prior toolbar (Show ±N could have been clicked before).
+  const oldBar = document.getElementById('turn-toolbar');
+  if (oldBar) oldBar.remove();
+  const oldPath = document.getElementById('turn-filepath');
+  if (oldPath) oldPath.remove();
+
+  const bar = document.createElement('div');
+  bar.id = 'turn-toolbar';
+  bar.className = 'row';
+
+  const copyBtn = document.createElement('button');
+  copyBtn.type = 'button';
+  copyBtn.textContent = 'Copy content';
+  copyBtn.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(t.content || '');
+      appendActivity('info', `copied turn ${t.session_id}/${t.turn_index}`);
+    } catch (err) {
+      appendActivity('error', `copy failed: ${err.message}`);
+    }
+  });
+  bar.appendChild(copyBtn);
+
+  const surrBtn = document.createElement('button');
+  surrBtn.type = 'button';
+  surrBtn.textContent = `Show ±${SURROUNDING_RADIUS} turns`;
+  surrBtn.addEventListener('click', () => loadSurrounding(t.session_id, t.turn_index, surrBtn));
+  bar.appendChild(surrBtn);
+
+  meta.parentNode.insertBefore(bar, document.getElementById('turn-content'));
+
+  if (t.file_path) {
+    const pathRow = document.createElement('p');
+    pathRow.id = 'turn-filepath';
+    pathRow.className = 'muted';
+    const label = document.createTextNode('source: ');
+    const code = document.createElement('code');
+    code.textContent = t.file_path;
+    pathRow.appendChild(label);
+    pathRow.appendChild(code);
+    meta.parentNode.insertBefore(pathRow, document.getElementById('turn-content'));
+  }
+}
+
+// loadSurrounding fetches ±N turns around the focused one (skipping
+// the focused index itself) and renders them above + below the
+// main content. Missing turns (404) are skipped silently — the
+// edges of a session don't have neighbours in both directions.
+async function loadSurrounding(sessionID, focusIdx, btn) {
+  btn.disabled = true;
+  const oldSurr = document.getElementById('turn-surrounding');
+  if (oldSurr) oldSurr.remove();
+
+  const wrap = document.createElement('div');
+  wrap.id = 'turn-surrounding';
+
+  const before = [];
+  const after = [];
+  for (let d = 1; d <= SURROUNDING_RADIUS; d++) {
+    before.push(fetchTurnSafe(sessionID, focusIdx - d));
+    after.push(fetchTurnSafe(sessionID, focusIdx + d));
+  }
+  const beforeTurns = (await Promise.all(before)).filter(Boolean).reverse();
+  const afterTurns = (await Promise.all(after)).filter(Boolean);
+
+  if (beforeTurns.length > 0) {
+    const h = document.createElement('h3');
+    h.textContent = `Before (${beforeTurns.length})`;
+    wrap.appendChild(h);
+    for (const t of beforeTurns) wrap.appendChild(surroundingBlock(t));
+  }
+  if (afterTurns.length > 0) {
+    const h = document.createElement('h3');
+    h.textContent = `After (${afterTurns.length})`;
+    wrap.appendChild(h);
+    for (const t of afterTurns) wrap.appendChild(surroundingBlock(t));
+  }
+  if (beforeTurns.length === 0 && afterTurns.length === 0) {
+    const p = document.createElement('p');
+    p.className = 'muted';
+    p.textContent = '(no neighbouring turns)';
+    wrap.appendChild(p);
+  }
+  document.getElementById('turn-content').after(wrap);
+}
+
+async function fetchTurnSafe(sessionID, idx) {
+  if (idx < 0) return null;
+  try {
+    return await fetchJSON('GET',
+      `/api/turn?session_id=${encodeURIComponent(sessionID)}&turn_index=${idx}`);
+  } catch (err) {
+    if (err.status === 404) return null;
+    appendActivity('error', `surrounding turn ${idx}: ${err.message}`);
+    return null;
+  }
+}
+
+function surroundingBlock(t) {
+  const div = document.createElement('div');
+  div.className = 'surrounding-turn';
+  const head = document.createElement('p');
+  head.className = 'muted';
+  head.textContent = `turn ${t.turn_index} · ${t.role || '?'}`;
+  const pre = document.createElement('pre');
+  pre.className = 'turn-content';
+  pre.textContent = t.content || '';
+  div.appendChild(head);
+  div.appendChild(pre);
+  return div;
 }
 
 // ─── SSE ──────────────────────────────────────────────────────────────

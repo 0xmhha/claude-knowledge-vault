@@ -277,6 +277,9 @@ func TestTurn_HappyPath(t *testing.T) {
 	if resp.Title != "Choice" || !strings.Contains(resp.Content, "body of the turn") {
 		t.Errorf("payload wrong: %+v", resp)
 	}
+	if resp.FilePath == "" {
+		t.Errorf("expected file_path populated from session row")
+	}
 }
 
 func TestTurn_NotFound(t *testing.T) {
