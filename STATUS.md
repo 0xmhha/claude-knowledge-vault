@@ -53,7 +53,11 @@ SHA 와 함께 명시했으니, 위 디렉토리만 있으면 `cp` 한 차례로
   5. `~/.claude/projects/*.jsonl` read-only walk (hook 캡쳐는 v2)
   6. 3 surface: MCP + dashboard + slash
 
-## 3. 완료 현황 (17 commits)
+## 3. 완료 현황 (17 task commits — snapshot at `fadcd7d`)
+
+> 이 표는 1차 마무리 시점의 task commit 만 — 이후 docs 보강 (STATUS
+> 자신 + onboarding patch + README placeholder) 은 git log 로 직접
+> 확인. `git log --oneline | head` 가 항상 더 정확하다.
 
 ```
 fadcd7d  feat(dashboard): T-D.5 drawer polish — keyboard nav + surrounding turns
@@ -414,7 +418,7 @@ git config user.email 'wm-it@local'   # 또는 본인 이메일
 
 ```bash
 cd go && go test -race -cover ./... && go vet ./... && cd ..
-golangci-lint run go/... --timeout=2m
+( cd go && golangci-lint run ./... --timeout=2m )
 ```
 
 기대값: 9 package 전부 green, lint 0 issues, 평균 cov 80%+
