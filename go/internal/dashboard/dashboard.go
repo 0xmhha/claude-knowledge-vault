@@ -66,13 +66,17 @@ type Server struct {
 	MaskSecrets bool
 }
 
-// New returns a Server with default tuning.
+// New returns a Server with default tuning, including a StaticHandler
+// backed by the embedded web/ assets. Callers can override
+// StaticHandler after construction (tests do this to swap in a stub
+// or assert the nil-fallback placeholder).
 func New(db *store.DB, root, dataDir string) *Server {
 	return &Server{
-		db:          db,
-		root:        root,
-		dataDir:     dataDir,
-		MaskSecrets: true,
+		db:            db,
+		root:          root,
+		dataDir:       dataDir,
+		MaskSecrets:   true,
+		StaticHandler: defaultStaticHandler(),
 	}
 }
 

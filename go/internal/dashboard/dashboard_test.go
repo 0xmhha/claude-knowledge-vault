@@ -85,13 +85,66 @@ func TestHealth(t *testing.T) {
 }
 
 func TestRoot_PlaceholderWhenNoStatic(t *testing.T) {
+	// Explicit nil StaticHandler — bypasses the embed default to
+	// assert the in-package placeholder is still served when callers
+	// opt out (zero-value &Server{} construction).
 	s, _ := newServer(t)
+	s.StaticHandler = nil
 	rec := doReq(t, s.Handler(), http.MethodGet, "/", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d", rec.Code)
 	}
 	if !strings.Contains(rec.Body.String(), "Dashboard UI ships") {
 		t.Errorf("placeholder body wrong: %q", rec.Body.String())
+	}
+}
+
+// ─── embed.FS-backed static assets (T-D.4) ──────────────────────────
+
+func TestEmbed_ServesIndex(t *testing.T) {
+	s, _ := newServer(t)
+	rec := doReq(t, s.Handler(), http.MethodGet, "/", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	// Must be the real embedded index.html, not the placeholder.
+	if !strings.Contains(body, `id="search-form"`) {
+		t.Errorf("expected embedded index.html, got first 200B: %q",
+			body[:min(200, len(body))])
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "text/html") {
+		t.Errorf("wrong content-type for /: %q", ct)
+	}
+}
+
+func TestEmbed_ServesStyleCSS(t *testing.T) {
+	s, _ := newServer(t)
+	rec := doReq(t, s.Handler(), http.MethodGet, "/style.css", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "monospace") {
+		t.Errorf("expected style.css body, got first 80B: %q",
+			rec.Body.String()[:min(80, rec.Body.Len())])
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "text/css") {
+		t.Errorf("expected text/css, got %q", ct)
+	}
+}
+
+func TestEmbed_ServesAppJS(t *testing.T) {
+	s, _ := newServer(t)
+	rec := doReq(t, s.Handler(), http.MethodGet, "/app.js", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "EventSource") {
+		t.Errorf("expected app.js with SSE wiring, got: %q",
+			rec.Body.String()[:min(80, rec.Body.Len())])
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "javascript") {
+		t.Errorf("expected javascript content-type, got %q", ct)
 	}
 }
 
